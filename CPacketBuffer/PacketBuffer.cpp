@@ -1,6 +1,7 @@
 
-#include "SerializeBuffer.h"
+#include "PacketBuffer.h"
 
+CMemoryPool<CPacketBuffer> CPacketBuffer::PacketPool;
 
 
 CPacketBuffer::CPacketBuffer()
@@ -12,6 +13,7 @@ CPacketBuffer::CPacketBuffer()
 
 	m_chpReadPos = m_chpBuffer;
 	m_chpWritePos = m_chpBuffer;
+	m_ReferenceCount = 1;
 }
 
 CPacketBuffer::CPacketBuffer(int iBufferSize)
@@ -24,6 +26,7 @@ CPacketBuffer::CPacketBuffer(int iBufferSize)
 
 	m_chpReadPos = m_chpBuffer;
 	m_chpWritePos = m_chpBuffer;
+	m_ReferenceCount = 1;
 }
 
 CPacketBuffer::~CPacketBuffer()
@@ -34,23 +37,17 @@ CPacketBuffer::~CPacketBuffer()
 
 void CPacketBuffer::Release(void)
 {
-	Clear();
-	m_iBufferSize = 0;
-
-	if (m_chpBuffer != nullptr)
-	{
-		delete[] m_chpBuffer;
-		m_chpBuffer = nullptr;
-	}
+	ClearBuffer();
 }
-void	CPacketBuffer::Clear(void)
+void	CPacketBuffer::ClearBuffer(void)
 {
 	m_chpReadPos = nullptr;
 	m_chpWritePos = nullptr;
 
-	m_chpReadPos = m_chpWritePos = m_chpBuffer;
+	m_chpReadPos = m_chpWritePos = m_chpBuffer + eHEADER_SIZE;
 
 	m_iDataSize = 0;
+	m_ReferenceCount = 1;
 }
 
 int	CPacketBuffer::MoveWritePos(int iSize)
@@ -78,7 +75,7 @@ int	CPacketBuffer::MoveReadPos(int iSize)
 	m_iDataSize -= iSize;
 
 	if (m_iDataSize == 0)
-		Clear();
+		ClearBuffer();
 
 	return iSize;
 }
@@ -105,7 +102,7 @@ int	CPacketBuffer::GetData(char *chpDest, int iSize)
 	m_iDataSize -= iSize;
 
 	if (m_iDataSize == 0)
-		Clear();
+		ClearBuffer();
 
 	return iSize;
 }
@@ -124,6 +121,12 @@ int	CPacketBuffer::PutData(char *chpSrc, int iSrcSize)
 
 CPacketBuffer& CPacketBuffer::operator=(CPacketBuffer &clSrCPacketBuffer)
 {
+	if (m_chpBuffer != nullptr)
+	{
+		delete[] m_chpBuffer;
+		m_chpBuffer = nullptr;
+	}
+
 	this->m_iDataSize = clSrCPacketBuffer.m_iDataSize;
 	this->m_iBufferSize = clSrCPacketBuffer.m_iBufferSize;
 
@@ -140,6 +143,19 @@ CPacketBuffer& CPacketBuffer::operator=(CPacketBuffer &clSrCPacketBuffer)
 	return *this;
 }
 
+void CPacketBuffer::AddRefCount()
+{
+	InterlockedIncrement64(&m_ReferenceCount);
+}
+
+void CPacketBuffer::Free()
+{
+	if (InterlockedDecrement64(&m_ReferenceCount) == 0)
+	{
+		m_bAlloced = false;
+		PacketPool.Free(this);
+	}
+}
 /*
 CPacketBuffer& CPacketBuffer::operator<<(BYTE byValue)
 {
